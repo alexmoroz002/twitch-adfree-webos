@@ -1,5 +1,5 @@
 import { configRead } from '../config';
-import { LOAD_EMOTES } from '../constants/config.constants';
+import { LOAD_EMOTES, USE_EMOTE_PROXY, EMOTE_PROXY_URL } from '../constants/config.constants';
 import {
   tvClientId,
   twitchGraphQLEndpoint,
@@ -13,25 +13,30 @@ import { showNotification } from './ui';
   const EMOTE_SIZE = '1x';
   const API_7TV = 'https://7tv.io/v3';
   const API_BTTV = 'https://api.betterttv.net/3/cached';
+  const API_FFZ = 'https://api.frankerfacez.com/v1';
+  let EMOTE_PROXY = ''
   const CHAT_SELECTOR = 'main > aside';
   const MESSAGE_SELECTOR = 'r-1xq2hnv';
 
   // Global variables
   let emoteMap7tv = new Map();
   let emoteMapBttv = new Map();
+  let emoteMapFfz = new Map();
   let currentChannelLogin = null;
   let authToken = null;
 
   async function fetch7TVEmotes(userId) {
     try {
-      const res = await fetch(`${API_7TV}/users/twitch/${userId}`);
-      if (!res.ok) {
+      const res = await fetch(`${EMOTE_PROXY}${API_7TV}/users/twitch/${userId}`);
+      const globalRes = await fetch(`${EMOTE_PROXY}${API_7TV}/emote-sets/global`);
+      if (!res.ok || !globalRes.ok) {
         emoteMap7tv = new Map();
         return;
       }
 
       const data = await res.json();
-      const emotes = data.emote_set?.emotes || [];
+      const globalData = await globalRes.json();
+      const emotes = [...(data.emote_set?.emotes || []), ...(globalData.emotes || [])];
 
       if (emotes.length === 0) {
         return;
@@ -40,38 +45,92 @@ import { showNotification } from './ui';
       showNotification('7TV emotes loaded successfully!');
 
       emotes.forEach((emote) => {
-        const url = `https:${emote.data.host.url}/${EMOTE_SIZE}.webp`;
+        const url = `${EMOTE_PROXY}https:${emote.data.host.url}/${EMOTE_SIZE}.webp`;
         emoteMap7tv.set(emote.name, url);
       });
     } catch (err) {
-      console.error('[7TV] Error al obtener emotes:', err);
+      console.error('[7TV] Error wile fetching emotes:', err);
     }
   }
 
   async function fetchBTTVEmotes(userId) {
     try {
-      const res = await fetch(`${API_BTTV}/users/twitch/${userId}`);
+      const res = await fetch(`${EMOTE_PROXY}${API_BTTV}/users/twitch/${userId}`);
+      const globalRes = await fetch(`${EMOTE_PROXY}${API_BTTV}/emotes/global`);
 
-      if (!res.ok) {
+      if (!res.ok || !globalRes.ok) {
         emoteMapBttv = new Map();
         return;
       }
       const data = await res.json();
+      const globalData = await globalRes.json();
 
       const emotes = [
         ...(data.sharedEmotes || []),
-        ...(data.channelEmotes || [])
+        ...(data.channelEmotes || []),
+        ...(globalData || []),
       ];
       if (emotes.length === 0) {
         return;
       }
       showNotification('BTTV emotes loaded successfully!');
       emotes.forEach((emote) => {
-        const url = `https://cdn.betterttv.net/emote/${emote.id}/${EMOTE_SIZE}.${emote.imageType}`;
+        const url = `${EMOTE_PROXY}https://cdn.betterttv.net/emote/${emote.id}/${EMOTE_SIZE}.${emote.imageType}`;
         emoteMapBttv.set(emote.code, url);
       });
     } catch (err) {
-      console.error('[BTTV] Error al obtener emotes:', err);
+      console.error('[BTTV] Error wile fetching emotes:', err);
+    }
+  }
+
+  async function fetchFFZEmotes(userId) {
+    try {
+      const res = await fetch(`${EMOTE_PROXY}${API_FFZ}/room/id/${userId}`);
+      const resGlobal = await fetch(`${EMOTE_PROXY}${API_FFZ}/_set/global`);
+      if (!res.ok) {
+        emoteMapFfz = new Map();
+        return;
+      }
+
+      const data = await res.json();
+      const emoteSetId = data.room.set;
+      const globalSets = await resGlobal.json().default_sets || [];
+      const emotes = [
+        ...(data.sets[emoteSetId].emoticons || []),
+        ...(await fetchFFZGlobalEmotes(globalSets) || [])
+      ];
+      // const emotes = data.sets[emoteSetId].emoticons;
+
+      if (emotes.length === 0) {
+        return;
+      }
+
+      showNotification('FFZ channel emotes loaded successfully!')
+      emotes.forEach((emote) => {
+        const url = `${EMOTE_PROXY}${emote.urls["1"]}`;
+        emoteMapFfz.set(emote.name, url);
+      });
+    } catch (err) {
+      console.error('[FFZ] Error wile fetching emotes:', err);
+    }
+  }
+
+  async function fetchFFZGlobalEmotes(sets) {
+    try {
+      let allEmotes = [];
+      sets.forEach(async (set) => {
+        const res = await fetch(`${EMOTE_PROXY}${API_FFZ}/_set/${set}`);
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        console.log(`[FFZ] Processed set ${set}, loaded global emotes:`, data.emoticons.length);
+        allEmotes.push(...data.emoticons);
+      });
+      console.log(`[FFZ] Total global emotes loaded:`, allEmotes.length);
+      return allEmotes;
+    } catch (err) {
+      console.error('[FFZ] Error while fetching emotes:', err);
     }
   }
 
@@ -80,7 +139,7 @@ import { showNotification } from './ui';
 
     let replacedText = text;
     // Replace emote names using a split-and-rebuild approach to avoid regex issues
-    if (emoteMap7tv.size === 0 && emoteMapBttv.size === 0) return replacedText;
+    if (emoteMap7tv.size === 0 && emoteMapBttv.size === 0 && emoteMapFfz.size === 0) return replacedText;
 
     // Build a Set of emote names for fast lookup
 
@@ -92,7 +151,8 @@ import { showNotification } from './ui';
       const part = parts[i];
       const url7tv = emoteMap7tv.get(part);
       const urlBttv = emoteMapBttv.get(part);
-      const url = url7tv || urlBttv;
+      const urlFfz = emoteMapFfz.get(part);
+      const url = url7tv || urlBttv || urlFfz;
       if (url) {
         parts[i] = `<img src="${url}" alt="${part}" class="emote">`;
       }
@@ -140,11 +200,15 @@ import { showNotification } from './ui';
       if (!configRead(LOAD_EMOTES)) {
         return;
       }
+      if (configRead(USE_EMOTE_PROXY)) {
+        EMOTE_PROXY = configRead(EMOTE_PROXY_URL);
+      }
       const newUsername = getTwitchUsername(window.location.href);
       if (newUsername && newUsername !== currentChannelLogin) {
         currentChannelLogin = newUsername;
         emoteMap7tv = new Map(); // Reset emote map for the new channel
         emoteMapBttv = new Map();
+        emoteMapFfz = new Map();
 
         if (newUsername == 'search' || !newUsername) {
           return;
@@ -184,8 +248,11 @@ import { showNotification } from './ui';
             const data = await response.json();
             const userId = data[0]?.data?.user?.id;
             if (userId) {
-              await fetch7TVEmotes(userId);
-              await fetchBTTVEmotes(userId);
+              await Promise.all([
+                fetch7TVEmotes(userId),
+                fetchBTTVEmotes(userId),
+                fetchFFZEmotes(userId)
+              ]);
             }
           } else {
             console.error('Error fetching user ID:', response.statusText);
@@ -206,4 +273,4 @@ import { showNotification } from './ui';
  * Force babel to interpret this file as ESM so it
  * polyfills with ESM imports instead of CommonJS.
  */
-export {};
+export { };

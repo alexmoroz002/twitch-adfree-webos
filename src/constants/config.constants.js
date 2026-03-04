@@ -13,6 +13,8 @@ export const ENABLE_LOW_LATENCY = 'enableLowLatency';
 export const USE_CUSTOM_PROXY = 'useCustomProxy';
 export const CUSTOM_PROXY_URL = 'customProxyUrl';
 export const ACTION_RESET_CONFIG = 'actionResetConfig';
+export const USE_EMOTE_PROXY = 'useEmoteProxy';
+export const EMOTE_PROXY_URL = 'emoteProxyUrl';
 
 export const configOptions = {
   [ENABLE_LOW_LATENCY]: {
@@ -29,6 +31,14 @@ export const configOptions = {
     desc: 'Custom proxy URL for HLS streaming'
   },
   [ENABLE_AD_BLOCK]: { default: true, desc: 'Mute and hide ads automatically' },
+  [USE_EMOTE_PROXY]: {
+    default: false,
+    desc: 'Use emote proxy for 7TV, BTTV and FFZ emotes'
+  },
+  [EMOTE_PROXY_URL]: {
+    default: 'https://cdn.rte.net.ru/',
+    desc: 'Emote proxy URL'
+  },
   [DISABLE_ANIMATIONS]: {
     default: true,
     desc: 'Turn off UI animations for improved performance'
@@ -42,7 +52,7 @@ export const configOptions = {
     desc: 'Enable loading of 7TV and BTTV emotes in chat'
   },
   [ENABLE_CHAT_OVERLAY]: {
-    default: true,
+    default: false,
     desc: 'Display chat as a transparent overlay on top of the video'
   },
   [CHAT_POSITION]: {
